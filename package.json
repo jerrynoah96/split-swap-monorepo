@@ -1,0 +1,12 @@
+{
+  "name": "split-swap-monorepo",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "frontend": "npm run --workspace=frontend",
+    "backend": "npm run --workspace=backend",
+    "smart-contracts": "npm run --workspace=smart-contracts"
+  }
+} 
