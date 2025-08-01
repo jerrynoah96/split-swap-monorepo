@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, Trash2, ArrowDown, ChevronDown } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { parseUnits, formatUnits } from "viem";
 
 interface Split {
   id: string;
@@ -13,33 +14,90 @@ interface Split {
   amount: string;
 }
 
+interface Token {
+  address: string;
+  symbol: string;
+  name: string;
+  logoURI: string;
+  decimals: number;
+}
+
 const SwapInterface = () => {
   const { toast } = useToast();
-  const [sourceToken, setSourceToken] = useState("ETH");
-  const [sourceChain, setSourceChain] = useState("ethereum");
+  const [sourceTokenAddress, setSourceTokenAddress] = useState("0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"); // Default to native token (ETH)
+  const [sourceChain, setSourceChain] = useState("1"); // Default to Ethereum
   const [sourceAmount, setSourceAmount] = useState("1.0");
   const [splits, setSplits] = useState<Split[]>([
-    { id: "1", token: "USDC", chain: "base", percentage: "40", amount: "800" },
-    { id: "2", token: "wBTC", chain: "sonic", percentage: "30", amount: "600" },
-    { id: "3", token: "MATIC", chain: "arbitrum", percentage: "30", amount: "600" }
+    { id: "1", token: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48", chain: "base", percentage: "40", amount: "800" }, // Default to USDC
+    { id: "2", token: "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599", chain: "sonic", percentage: "30", amount: "600" }, // Default to wBTC
+    { id: "3", token: "0x7d1afa7b718fb893db30a3abc0cfc608aacfebb0", chain: "arbitrum", percentage: "30", amount: "600" } // Default to MATIC
   ]);
+  const [tokens, setTokens] = useState<Token[]>([]);
+  const [quote, setQuote] = useState<any>(null);
 
-  const tokens = [
-    { symbol: "ETH", name: "Ethereum", price: "$2000" },
-    { symbol: "USDC", name: "USD Coin", price: "$1.00" },
-    { symbol: "wBTC", name: "Wrapped Bitcoin", price: "$42000" },
-    { symbol: "MATIC", name: "Polygon", price: "$0.85" },
-    { symbol: "AVAX", name: "Avalanche", price: "$35" },
-    { symbol: "SOL", name: "Solana", price: "$95" }
-  ];
+  useEffect(() => {
+    const fetchTokens = async () => {
+      try {
+        const response = await fetch(`http://localhost:3001/tokens?chainId=${sourceChain}`);
+        const data = await response.json();
+        if (data.tokens) {
+          const tokenList = Object.values(data.tokens);
+          setTokens(tokenList as Token[]);
+        }
+      } catch (error) {
+        console.error("Failed to fetch tokens:", error);
+      }
+    };
+
+    fetchTokens();
+  }, [sourceChain]);
+
+  useEffect(() => {
+    const getQuote = async () => {
+      if (!sourceTokenAddress || !splits.length || !sourceAmount || parseFloat(sourceAmount) <= 0) {
+        setQuote(null);
+        return;
+      }
+
+      // For simplicity, this example only gets a quote for the first split.
+      const firstSplit = splits[0];
+      if (!firstSplit.token) {
+        setQuote(null);
+        return;
+      }
+
+      try {
+        const response = await fetch(
+          `http://localhost:3001/quote?src=${sourceTokenAddress}&dst=${firstSplit.token}&amount=${parseFloat(sourceAmount) * (10 ** 18)}&chainId=${sourceChain}`
+        );
+        const data = await response.json();
+        if (response.ok) {
+          setQuote(data);
+        } else {
+          setQuote(null);
+          console.error("Failed to get quote:", data);
+        }
+      } catch (error) {
+        setQuote(null);
+        console.error("Failed to get quote:", error);
+      }
+    };
+
+    const debounceTimer = setTimeout(() => {
+      getQuote();
+    }, 500); // Debounce to avoid excessive API calls
+
+    return () => clearTimeout(debounceTimer);
+  }, [sourceTokenAddress, sourceChain, sourceAmount, splits]);
+
 
   const chains = [
-    { id: "ethereum", name: "Ethereum", color: "bg-blue-500" },
-    { id: "base", name: "Base", color: "bg-blue-600" },
-    { id: "sonic", name: "Sonic", color: "bg-purple-500" },
-    { id: "arbitrum", name: "Arbitrum", color: "bg-orange-500" },
-    { id: "polygon", name: "Polygon", color: "bg-purple-600" },
-    { id: "avalanche", name: "Avalanche", color: "bg-red-500" }
+    { id: "1", name: "Ethereum", color: "bg-blue-500" },
+    { id: "8453", name: "Base", color: "bg-blue-600" },
+    { id: "1337", name: "Sonic", color: "bg-purple-500" }, // Replace with actual chainId if available
+    { id: "42161", name: "Arbitrum", color: "bg-orange-500" },
+    { id: "137", name: "Polygon", color: "bg-purple-600" },
+    { id: "43114", name: "Avalanche", color: "bg-red-500" }
   ];
 
   const addSplit = () => {
@@ -118,17 +176,16 @@ const SwapInterface = () => {
                 </SelectContent>
               </Select>
               
-              <Select value={sourceToken} onValueChange={setSourceToken}>
+              <Select value={sourceTokenAddress} onValueChange={setSourceTokenAddress}>
                 <SelectTrigger className="border-0 bg-background h-10 px-3 min-w-20">
-                  <SelectValue />
+                  <SelectValue placeholder="Select Token" />
                   <ChevronDown className="h-4 w-4 opacity-50" />
                 </SelectTrigger>
                 <SelectContent className="bg-background border border-border">
                   {tokens.map(token => (
-                    <SelectItem key={token.symbol} value={token.symbol}>
+                    <SelectItem key={token.address} value={token.address}>
                       <div className="flex items-center justify-between w-full">
                         <span>{token.symbol}</span>
-                        <span className="text-muted-foreground ml-2 text-xs">{token.price}</span>
                       </div>
                     </SelectItem>
                   ))}
@@ -196,12 +253,12 @@ const SwapInterface = () => {
                   
                   <Select value={split.token} onValueChange={(value) => updateSplit(split.id, 'token', value)}>
                     <SelectTrigger className="border-0 bg-background h-8 px-2 min-w-16">
-                      <SelectValue />
+                      <SelectValue placeholder="Select Token" />
                       <ChevronDown className="h-3 w-3 opacity-50" />
                     </SelectTrigger>
                     <SelectContent className="bg-background border border-border">
                       {tokens.map(token => (
-                        <SelectItem key={token.symbol} value={token.symbol}>
+                        <SelectItem key={token.address} value={token.symbol}>
                           {token.symbol}
                         </SelectItem>
                       ))}
@@ -222,7 +279,7 @@ const SwapInterface = () => {
               </div>
               
               <div className="text-sm text-muted-foreground">
-                ≈ {split.amount} {split.token}
+                ≈ {quote && quote.toToken ? `${(quote.toTokenAmount / (10 ** quote.toToken.decimals)).toFixed(2)} ${quote.toToken.symbol}` : "0.00"}
               </div>
             </div>
           ))}
