@@ -1,10 +1,12 @@
 import { Button } from "@/components/ui/button";
 import { Wallet, Menu, X } from "lucide-react";
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import splitswapLogo from "@/assets/splitswap-logo.jpg";
 
 const Header = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const navigate = useNavigate();
 
   const navItems = [
     { label: "Swap", href: "#swap" },
@@ -44,7 +46,7 @@ const Header = () => {
 
           {/* Desktop Actions */}
           <div className="hidden md:flex items-center space-x-4">
-            <Button variant="glass" size="sm">
+            <Button variant="glass" size="sm" onClick={() => navigate('/swap')}>
               <Wallet className="w-4 h-4 mr-2" />
               Connect Wallet
             </Button>
@@ -78,7 +80,7 @@ const Header = () => {
                 </a>
               ))}
               <div className="px-4 pt-4">
-                <Button variant="glass" size="sm" className="w-full">
+                <Button variant="glass" size="sm" className="w-full" onClick={() => navigate('/swap')}>
                   <Wallet className="w-4 h-4 mr-2" />
                   Connect Wallet
                 </Button>

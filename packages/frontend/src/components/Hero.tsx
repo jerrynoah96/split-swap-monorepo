@@ -1,8 +1,11 @@
 import { Button } from "@/components/ui/button";
 import { ArrowDown, Zap, Network, Shuffle } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import splitswapLogo from "@/assets/splitswap-logo.jpg";
 
 const Hero = () => {
+  const navigate = useNavigate();
+  
   return (
     <div className="relative min-h-screen flex flex-col items-center justify-center overflow-hidden">
       {/* Background gradient overlay */}
@@ -62,7 +65,7 @@ const Hero = () => {
         </div>
 
         {/* CTA Button */}
-        <Button variant="hero" size="lg" className="px-8 py-4 text-lg">
+        <Button variant="hero" size="lg" className="px-8 py-4 text-lg" onClick={() => navigate('/swap')}>
           Start Swapping
           <ArrowDown className="ml-2 w-5 h-5" />
         </Button>
