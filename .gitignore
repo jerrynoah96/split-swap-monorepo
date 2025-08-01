@@ -38,3 +38,5 @@ Thumbs.db
 .env*.local
 packages/backend/.env
 packages/frontend/.env 
+packages/frontend/node_modules
+packages/backend/node_modules

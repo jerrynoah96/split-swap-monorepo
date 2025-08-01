@@ -1,9 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, Trash2, ArrowDown, ChevronDown } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useAccount, useSendTransaction, useBalance } from "wagmi";
 import { parseUnits, formatUnits } from "viem";
 
 interface Split {
@@ -11,7 +12,6 @@ interface Split {
   token: string;
   chain: string;
   percentage: string;
-  amount: string;
 }
 
 interface Token {
@@ -28,12 +28,20 @@ const SwapInterface = () => {
   const [sourceChain, setSourceChain] = useState("1"); // Default to Ethereum
   const [sourceAmount, setSourceAmount] = useState("1.0");
   const [splits, setSplits] = useState<Split[]>([
-    { id: "1", token: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48", chain: "base", percentage: "40", amount: "800" }, // Default to USDC
-    { id: "2", token: "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599", chain: "sonic", percentage: "30", amount: "600" }, // Default to wBTC
-    { id: "3", token: "0x7d1afa7b718fb893db30a3abc0cfc608aacfebb0", chain: "arbitrum", percentage: "30", amount: "600" } // Default to MATIC
+    { id: "1", token: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48", chain: "base", percentage: "40" }, // Default to USDC
+    { id: "2", token: "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599", chain: "sonic", percentage: "30" }, // Default to wBTC
+    { id: "3", token: "0x7d1afa7b718fb893db30a3abc0cfc608aacfebb0", chain: "arbitrum", percentage: "30" } // Default to MATIC
   ]);
   const [tokens, setTokens] = useState<Token[]>([]);
-  const [quote, setQuote] = useState<any>(null);
+  const [quotes, setQuotes] = useState<Record<string, any>>({});
+  const { address } = useAccount();
+  const { data: balance } = useBalance({
+    address,
+    token: sourceTokenAddress === "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" ? undefined : sourceTokenAddress as `0x${string}`,
+  });
+  const { sendTransaction } = useSendTransaction();
+
+  const sourceToken = useMemo(() => tokens.find(t => t.address === sourceTokenAddress), [tokens, sourceTokenAddress]);
 
   useEffect(() => {
     const fetchTokens = async () => {
@@ -53,43 +61,53 @@ const SwapInterface = () => {
   }, [sourceChain]);
 
   useEffect(() => {
-    const getQuote = async () => {
-      if (!sourceTokenAddress || !splits.length || !sourceAmount || parseFloat(sourceAmount) <= 0) {
-        setQuote(null);
+    const getQuotes = async () => {
+      if (!sourceToken || !splits.length || !sourceAmount || parseFloat(sourceAmount) <= 0) {
+        setQuotes({});
         return;
       }
 
-      // For simplicity, this example only gets a quote for the first split.
-      const firstSplit = splits[0];
-      if (!firstSplit.token) {
-        setQuote(null);
-        return;
-      }
-
-      try {
-        const response = await fetch(
-          `http://localhost:3001/quote?src=${sourceTokenAddress}&dst=${firstSplit.token}&amount=${parseFloat(sourceAmount) * (10 ** 18)}&chainId=${sourceChain}`
-        );
-        const data = await response.json();
-        if (response.ok) {
-          setQuote(data);
-        } else {
-          setQuote(null);
-          console.error("Failed to get quote:", data);
+      const quotePromises = splits.map(async (split) => {
+        if (!split.token || !split.percentage || parseFloat(split.percentage) <= 0) {
+          return { id: split.id, quote: null };
         }
-      } catch (error) {
-        setQuote(null);
-        console.error("Failed to get quote:", error);
-      }
+
+        const amountForSplit = (parseFloat(sourceAmount) * (parseFloat(split.percentage) / 100));
+        const amountInSmallestUnit = parseUnits(amountForSplit.toString(), sourceToken.decimals);
+
+        try {
+          const response = await fetch(
+            `http://localhost:3001/quote?src=${sourceTokenAddress}&dst=${split.token}&amount=${amountInSmallestUnit.toString()}&chainId=${sourceChain}`
+          );
+          const data = await response.json();
+          if (response.ok) {
+            return { id: split.id, quote: data };
+          } else {
+            console.error(`Failed to get quote for split ${split.id}:`, data);
+            return { id: split.id, quote: null };
+          }
+        } catch (error) {
+          console.error(`Failed to get quote for split ${split.id}:`, error);
+          return { id: split.id, quote: null };
+        }
+      });
+
+      const results = await Promise.all(quotePromises);
+      const newQuotes = results.reduce((acc, result) => {
+        if (result) {
+          acc[result.id] = result.quote;
+        }
+        return acc;
+      }, {} as Record<string, any>);
+      setQuotes(newQuotes);
     };
 
     const debounceTimer = setTimeout(() => {
-      getQuote();
+      getQuotes();
     }, 500); // Debounce to avoid excessive API calls
 
     return () => clearTimeout(debounceTimer);
-  }, [sourceTokenAddress, sourceChain, sourceAmount, splits]);
-
+  }, [sourceToken, sourceTokenAddress, sourceChain, sourceAmount, splits]);
 
   const chains = [
     { id: "1", name: "Ethereum", color: "bg-blue-500" },
@@ -106,7 +124,6 @@ const SwapInterface = () => {
       token: "USDC",
       chain: "ethereum",
       percentage: "0",
-      amount: "0"
     };
     setSplits([...splits, newSplit]);
   };
@@ -123,7 +140,11 @@ const SwapInterface = () => {
 
   const totalPercentage = splits.reduce((sum, split) => sum + (parseFloat(split.percentage) || 0), 0);
 
-  const executeSwap = () => {
+  const totalEstimatedGas = useMemo(() => {
+    return Object.values(quotes).reduce((sum, quote) => sum + (quote ? Number(quote.estimatedGas) : 0), 0);
+  }, [quotes]);
+
+  const executeSwap = async () => {
     if (totalPercentage !== 100) {
       toast({
         title: "Invalid Split",
@@ -132,11 +153,50 @@ const SwapInterface = () => {
       });
       return;
     }
-    
-    toast({
-      title: "Swap Initiated",
-      description: "Your multi-chain swap is being processed...",
-    });
+    if (!address || !sourceToken) {
+        toast({
+            title: "Error",
+            description: "Please connect your wallet and select a token.",
+            variant: "destructive",
+        });
+        return;
+    }
+
+    try {
+      // For simplicity, we'll use the first split for the swap data
+      const firstSplit = splits[0];
+      const amountInSmallestUnit = parseUnits(sourceAmount, sourceToken.decimals);
+
+      const response = await fetch(
+        `http://localhost:3001/swap?src=${sourceTokenAddress}&dst=${firstSplit.token}&amount=${amountInSmallestUnit.toString()}&from=${address}&slippage=1&chainId=${sourceChain}`
+      );
+      const swapData = await response.json();
+
+      if (response.ok) {
+        sendTransaction({
+            to: swapData.tx.to,
+            data: swapData.tx.data,
+            value: BigInt(swapData.tx.value),
+        });
+        toast({
+          title: "Swap Initiated",
+          description: "Your multi-chain swap is being processed...",
+        });
+      } else {
+        toast({
+          title: "Error",
+          description: swapData.error || "Failed to get swap data.",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+        console.error("Failed to execute swap:", error);
+        toast({
+            title: "Error",
+            description: "Failed to execute swap.",
+            variant: "destructive",
+        });
+    }
   };
 
   return (
@@ -148,7 +208,9 @@ const SwapInterface = () => {
         <div className="p-4 bg-muted/50 rounded-xl">
           <div className="flex justify-between items-center mb-3">
             <span className="text-sm text-muted-foreground">From</span>
-            <span className="text-sm text-muted-foreground">Balance: 5.2</span>
+            <span className="text-sm text-muted-foreground">
+              Balance: {balance ? `${parseFloat(balance.formatted).toFixed(4)} ${balance.symbol}`: "Loading..."}
+            </span>
           </div>
           
           <div className="flex justify-between items-center">
@@ -279,7 +341,7 @@ const SwapInterface = () => {
               </div>
               
               <div className="text-sm text-muted-foreground">
-                ≈ {quote && quote.toToken ? `${(quote.toTokenAmount / (10 ** quote.toToken.decimals)).toFixed(2)} ${quote.toToken.symbol}` : "0.00"}
+                ≈ {quotes[split.id] && quotes[split.id].toToken ? `${formatUnits(quotes[split.id].toTokenAmount, quotes[split.id].toToken.decimals)} ${quotes[split.id].toToken.symbol}` : "0.00"}
               </div>
             </div>
           ))}
@@ -300,11 +362,11 @@ const SwapInterface = () => {
       <div className="mt-4 p-4 bg-muted/30 rounded-xl text-sm text-muted-foreground">
         <div className="flex justify-between">
           <span>Est. Gas:</span>
-          <span>~$12.50</span>
+          <span>{totalEstimatedGas > 0 ? `${totalEstimatedGas} units` : "$0.00"}</span>
         </div>
         <div className="flex justify-between mt-1">
           <span>Total Value:</span>
-          <span>~$2,000 USD</span>
+          <span>~$0.00</span>
         </div>
       </div>
     </div>

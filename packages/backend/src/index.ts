@@ -29,6 +29,33 @@ app.get('/tokens', async (req, res) => {
     }
 });
 
+app.get('/swap', async (req, res) => {
+    const { src, dst, amount, from, slippage, chainId } = req.query;
+
+    if (!src || !dst || !amount || !from || !slippage || !chainId) {
+        return res.status(400).json({ error: 'Missing required query parameters' });
+    }
+
+    try {
+        const response = await axios.get(`https://api.1inch.dev/swap/v6.0/${chainId}/swap`, {
+            headers: {
+                Authorization: `Bearer ${process.env.ONEINCH_API_KEY}`,
+            },
+            params: {
+                src: src as string,
+                dst: dst as string,
+                amount: amount as string,
+                from: from as string,
+                slippage: slippage as string,
+            },
+        });
+        res.json(response.data);
+    } catch (error) {
+        console.error('Error fetching swap data from 1inch:', error);
+        res.status(500).json({ error: 'Failed to fetch swap data from 1inch' });
+    }
+});
+
 app.get('/quote', async (req, res) => {
     const { src, dst, amount, chainId } = req.query;
 
